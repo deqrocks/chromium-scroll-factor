@@ -162,13 +162,15 @@ function canScrollPosition(position, maxPosition, delta) {
 }
 
 function applyScroll(target, x, y) {
-  if (target === document.scrollingElement || target === document.documentElement) {
-    window.scrollBy(x, y);
-    return;
-  }
+  const isDocumentScroller =
+    target === document.scrollingElement || target === document.documentElement;
+  const scroller = isDocumentScroller ? getDocumentScroller() : target;
+  const previousScrollBehavior = scroller.style.scrollBehavior;
 
-  target.scrollLeft += x;
-  target.scrollTop += y;
+  scroller.style.scrollBehavior = "auto";
+  scroller.scrollLeft += x;
+  scroller.scrollTop += y;
+  scroller.style.scrollBehavior = previousScrollBehavior;
 }
 
 function postScrollToParent(x, y) {
