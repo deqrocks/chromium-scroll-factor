@@ -75,11 +75,11 @@ function normalizeDelta(event) {
 function canScrollTestBox(deltaX, deltaY) {
   const maxX = testBox.scrollWidth - testBox.clientWidth;
   const maxY = testBox.scrollHeight - testBox.clientHeight;
-  return canScrollAxis(testBox.scrollLeft, maxX, deltaX) ||
-    canScrollAxis(testBox.scrollTop, maxY, deltaY);
+  return canScrollPosition(testBox.scrollLeft, maxX, deltaX) ||
+    canScrollPosition(testBox.scrollTop, maxY, deltaY);
 }
 
-function canScrollAxis(position, maxPosition, delta) {
+function canScrollPosition(position, maxPosition, delta) {
   if (!delta || maxPosition <= 0) return false;
   return delta < 0 ? position > 0 : position < maxPosition;
 }

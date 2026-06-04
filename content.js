@@ -2,8 +2,10 @@ const DEFAULTS = {
   enabled: true,
   factor: 0.3
 };
+const MESSAGE_TYPE = "scroll-factor:wheel";
 
 let options = { ...DEFAULTS };
+const isFrame = window.self !== window.top;
 
 chrome.storage.sync.get(DEFAULTS, (stored) => {
   options = normalizeOptions(stored);
@@ -21,6 +23,7 @@ window.addEventListener("wheel", onWheel, {
   capture: true,
   passive: false
 });
+window.addEventListener("message", onMessage);
 
 function onWheel(event) {
   if (!options.enabled || event.defaultPrevented || event.ctrlKey) return;
@@ -29,10 +32,31 @@ function onWheel(event) {
   const x = delta.x * options.factor;
   const y = delta.y * options.factor;
   const target = scrollTarget(event.target, x, y);
-  if (!target) return;
+  if (!target) {
+    if (isFrame) {
+      event.preventDefault();
+      postScrollToParent(x, y);
+    }
+    return;
+  }
 
   event.preventDefault();
   applyScroll(target, x, y);
+}
+
+function onMessage(event) {
+  if (!options.enabled || event.source === window) return;
+  if (event.data?.type !== MESSAGE_TYPE) return;
+
+  const { x, y } = event.data;
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+
+  const target = scrollTarget(frameElementFromEvent(event), x, y);
+  if (target) {
+    applyScroll(target, x, y);
+  } else if (isFrame) {
+    postScrollToParent(x, y);
+  }
 }
 
 function normalizeOptions(value) {
@@ -64,10 +88,10 @@ function normalizeDelta(event) {
 
 function scrollTarget(start, deltaX, deltaY) {
   for (let node = elementFrom(start); node; node = node.parentElement) {
+    if (isRootScrollerCandidate(node, deltaX, deltaY)) return getDocumentScroller();
     if (canScroll(node, deltaX, deltaY)) return node;
   }
-  const root = document.scrollingElement || document.documentElement;
-  return canScroll(root, deltaX, deltaY) ? root : null;
+  return canScrollDocument(deltaX, deltaY) ? getDocumentScroller() : null;
 }
 
 function elementFrom(node) {
@@ -76,16 +100,43 @@ function elementFrom(node) {
   return node.parentElement;
 }
 
+function getDocumentScroller() {
+  return document.scrollingElement || document.documentElement;
+}
+
+function isRootScrollerCandidate(element, deltaX, deltaY) {
+  const root = document.documentElement;
+  const body = document.body;
+  if (!root || !body) return false;
+
+  const horizontal = Math.abs(deltaX) > Math.abs(deltaY);
+  const fullSize = horizontal ?
+    element.scrollWidth === root.scrollWidth :
+    element.scrollHeight === root.scrollHeight;
+
+  if (!fullSize) return false;
+  if (isFrame) return canScrollDocument(deltaX, deltaY);
+  return overflowIsNotHidden(root, horizontal) &&
+    overflowIsNotHidden(body, horizontal) &&
+    canScrollDocument(deltaX, deltaY);
+}
+
+function canScrollDocument(deltaX, deltaY) {
+  const root = getDocumentScroller();
+  return canScrollPosition(window.scrollX, root.scrollWidth - window.innerWidth, deltaX) ||
+    canScrollPosition(window.scrollY, root.scrollHeight - window.innerHeight, deltaY);
+}
+
 function canScroll(element, deltaX, deltaY) {
   if (!(element instanceof Element)) return false;
 
   const style = getComputedStyle(element);
-  return canScrollAxis(
+  return canScrollElementAxis(
     style.overflowX,
     element.scrollLeft,
     element.scrollWidth - element.clientWidth,
     deltaX
-  ) || canScrollAxis(
+  ) || canScrollElementAxis(
     style.overflowY,
     element.scrollTop,
     element.scrollHeight - element.clientHeight,
@@ -93,10 +144,20 @@ function canScroll(element, deltaX, deltaY) {
   );
 }
 
-function canScrollAxis(overflow, position, maxPosition, delta) {
+function overflowIsNotHidden(element, horizontal) {
+  const property = horizontal ? "overflowX" : "overflowY";
+  return getComputedStyle(element)[property] !== "hidden";
+}
+
+function canScrollElementAxis(overflow, position, maxPosition, delta) {
   if (!delta || !/^(auto|scroll|overlay)$/.test(overflow) || maxPosition <= 0) {
     return false;
   }
+  return canScrollPosition(position, maxPosition, delta);
+}
+
+function canScrollPosition(position, maxPosition, delta) {
+  if (!delta || maxPosition <= 0) return false;
   return delta < 0 ? position > 0 : position < maxPosition;
 }
 
@@ -108,4 +169,15 @@ function applyScroll(target, x, y) {
 
   target.scrollLeft += x;
   target.scrollTop += y;
+}
+
+function postScrollToParent(x, y) {
+  window.parent.postMessage({ type: MESSAGE_TYPE, x, y }, "*");
+}
+
+function frameElementFromEvent(event) {
+  for (const frame of document.querySelectorAll("iframe, frame")) {
+    if (frame.contentWindow === event.source) return frame;
+  }
+  return document.body;
 }
